@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool(
-    title="Get My Playlists",
+    title="List My Playlists",
     annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=True),
     icons=[SPOTIFY_ICON],
 )
@@ -210,8 +210,8 @@ async def create_playlist(
 
     Args:
         name: Playlist name
-        description: Playlist description (default empty)
-        public: Whether the playlist is publicly visible (default False)
+        description: Playlist description (default: empty)
+        public: Whether playlist is public (default: True)
 
     Returns:
         The newly created Playlist. Add tracks with add_tracks_to_playlist.
@@ -237,7 +237,7 @@ async def create_playlist(
 
 
 @mcp.tool(
-    title="Update Playlist Details",
+    title="Edit Playlist Details",
     annotations=ToolAnnotations(
         read_only_hint=False,
         destructive_hint=True,
@@ -301,7 +301,7 @@ async def add_tracks_to_playlist(
 
     Args:
         playlist_id: Playlist ID
-        track_uris: Track IDs or URIs to add
+        track_uris: Track IDs or URIs to add (up to 100)
     """
 
     def work(client: spotipy.Spotify, scope: str) -> ActionResult:
@@ -321,7 +321,7 @@ async def add_tracks_to_playlist(
     annotations=ToolAnnotations(
         read_only_hint=False,
         destructive_hint=True,
-        idempotent_hint=True,
+        idempotent_hint=False,
         open_world_hint=True,
     ),
     icons=[SPOTIFY_ICON],
@@ -421,11 +421,11 @@ async def reorder_playlist_tracks(
 async def unfollow_playlist(playlist_id: str, ctx: Context | None = None) -> ActionResult:
     """Unfollow (remove from the user's library) a playlist.
 
+    For playlists the user owns this is how Spotify deletes them — there is no
+    separate delete endpoint.
+
     Args:
         playlist_id: Playlist ID
-
-    Note: This does not delete a playlist the user owns; it removes it from
-    their library the way "Remove from Your Library" does in the app.
     """
 
     def work(client: spotipy.Spotify, scope: str) -> ActionResult:

@@ -178,6 +178,43 @@ async def test_remove_tracks_removes_without_confirming(
     assert result.snapshot_id == "s2"
 
 
+async def test_add_tracks_accepts_track_uris_as_a_keyword(
+    fake_spotify: FakeSpotify, ctx: FakeCtx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Pins the parameter NAME. The prior defect (track_ids instead of track_uris)
+    # survived because every existing call site was positional; a keyword call
+    # would have raised TypeError immediately.
+    monkeypatch.setattr(
+        "spotify_mcp_mx.spotify_api.playlist_add_items",
+        lambda client, scope, pid, uris: {"snapshot_id": "s4"},
+    )
+    result = await add_tracks_to_playlist(playlist_id="37i9", track_uris=["abc"], ctx=ctx)
+    assert result.snapshot_id == "s4"
+
+
+async def test_remove_tracks_accepts_track_uris_as_a_keyword(
+    fake_spotify: FakeSpotify, ctx: FakeCtx, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "spotify_mcp_mx.spotify_api.playlist_remove_items",
+        lambda client, scope, pid, uris: {"snapshot_id": "s5"},
+    )
+    result = await remove_tracks_from_playlist(playlist_id="37i9", track_uris=["abc"], ctx=ctx)
+    assert result.snapshot_id == "s5"
+
+
+async def test_add_and_remove_tracks_schemas_expose_track_uris() -> None:
+    # A schema-level pin: even a future call-site-only rename (e.g. reverting to
+    # track_ids while leaving every test call positional) would still be caught
+    # here, since this reads the generated input schema rather than calling the
+    # tool.
+    from spotify_mcp_mx.server import mcp
+
+    tools = {t.name: t for t in await mcp.list_tools()}
+    assert "track_uris" in tools["add_tracks_to_playlist"].input_schema["properties"]
+    assert "track_uris" in tools["remove_tracks_from_playlist"].input_schema["properties"]
+
+
 async def test_reorder_validates_positions(
     fake_spotify: FakeSpotify, ctx: FakeCtx
 ) -> None:
