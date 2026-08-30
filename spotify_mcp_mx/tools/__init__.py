@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from . import catalog, playback  # noqa: F401  - imported for their registration side effects
+from . import catalog, library, playback  # noqa: F401  - registration side effects
 
-__all__ = ["catalog", "playback"]
+__all__ = ["catalog", "library", "playback"]
