@@ -19,7 +19,7 @@ __all__ = ["parse_album", "parse_artist", "parse_playlist", "parse_track"]
 def parse_track(item: TrackObject) -> Track:
     """Parse Spotify track data into a Track."""
     album_data: dict[str, Any] = cast("dict[str, Any]", item.get("album") or {})
-    artists: list[Any] = cast("list[Any]", item.get("artists") or [])
+    artists = item.get("artists") or []
     return Track(
         name=item["name"],
         id=item["id"],
@@ -36,7 +36,7 @@ def parse_track(item: TrackObject) -> Track:
 
 def parse_artist(item: ArtistObject) -> Artist:
     """Parse Spotify artist data into an Artist."""
-    followers: dict[str, Any] = cast("dict[str, Any]", item.get("followers") or {})
+    followers = item.get("followers") or {}
     return Artist(
         name=item["name"],
         id=item["id"],
@@ -48,7 +48,7 @@ def parse_artist(item: ArtistObject) -> Artist:
 
 def parse_album(item: AlbumObject) -> Album:
     """Parse Spotify album metadata into an Album (without its track list)."""
-    artists: list[Any] = cast("list[Any]", item.get("artists") or [])
+    artists = item.get("artists") or []
     return Album(
         name=item["name"],
         id=item["id"],
@@ -69,8 +69,8 @@ def parse_playlist(
     item: PlaylistObject, *, tracks: list[Track] | None = None
 ) -> Playlist:
     """Parse Spotify playlist metadata into a Playlist."""
-    owner: dict[str, Any] = cast("dict[str, Any]", item.get("owner") or {})
-    tracks_meta: dict[str, Any] = cast("dict[str, Any]", item.get("tracks") or {})
+    owner = item.get("owner") or {}
+    tracks_meta = item.get("tracks") or {}
     return Playlist(
         name=item["name"],
         id=item["id"],
