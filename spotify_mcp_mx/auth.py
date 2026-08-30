@@ -2,9 +2,11 @@
 
 This server holds no Spotify credentials of its own. Every caller supplies their
 own on every request, and each tool call gets a freshly built client that is
-dropped as soon as the call returns. Keeping clients per-call (rather than
-caching one per caller) means one caller's token can never serve another's
-request.
+dropped as soon as the call returns. spotipy holds the access token on the
+``spotipy.Spotify`` instance itself (``self._auth``) and attaches it fresh to
+the headers of every request that instance makes, so keeping clients per-call
+(rather than caching one per caller) means one caller's token can never serve
+another's request.
 
 ``spotipy.oauth2.SpotifyOAuth`` is deliberately unused: its default cache
 handler writes a ``.cache`` token file to disk, which is exactly the credential
@@ -260,14 +262,21 @@ class _SharedPoolAdapter(HTTPAdapter):
 # actually makes 5xx retries happen for api.spotify.com calls made through
 # spotipy.
 #
-# `allowed_methods` is deliberately NOT set: urllib3's default
-# (HEAD, GET, PUT, DELETE, OPTIONS, TRACE) applies, which excludes POST. This
-# pool is mounted on every per-call spotipy client, and spotipy issues POST
-# for genuine writes — add_to_queue, add_tracks_to_playlist, create_playlist.
-# A POST that reached Spotify and succeeded but returned a 502/503/504 from a
-# gateway on the way back would, if retried, duplicate that write. PUT and
-# DELETE stay retry-eligible because Spotify's playlist-reorder and
-# library-add/-remove calls are idempotent by design — replaying one is safe.
+# `allowed_methods` is set explicitly to GET, HEAD, OPTIONS, TRACE and DELETE.
+# This pool is mounted on every per-call spotipy client, and spotipy issues
+# POST for genuine writes — add_to_queue, add_tracks_to_playlist,
+# create_playlist. A POST that reached Spotify and succeeded but returned a
+# 502/503/504 from a gateway on the way back would, if retried, duplicate
+# that write, so POST is excluded. PUT is excluded too, even though urllib3's
+# default retry set includes it: spotipy's PUT calls are mixed. save_tracks
+# (PUT me/library) is idempotent, but playlist_reorder_items (PUT
+# playlists/{id}/items) is not — replaying a reorder after Spotify already
+# applied it moves a *different* block of tracks and can scramble the
+# playlist, and reorder's snapshot_id guard is optional and usually absent.
+# One non-idempotent, user-data-corrupting write outweighs retry coverage on
+# an idempotent one, so PUT stays off the whole pool. DELETE stays eligible
+# because both DELETE call sites (playlist_remove_items,
+# remove_saved_tracks) remove specific named URIs, so a replay is a no-op.
 _SHARED_POOL = _SharedPoolAdapter(
     pool_connections=4,
     pool_maxsize=32,
@@ -277,6 +286,7 @@ _SHARED_POOL = _SharedPoolAdapter(
         read=False,
         backoff_factor=0.3,
         status_forcelist=RETRY_STATUS_CODES,
+        allowed_methods=frozenset(["GET", "HEAD", "OPTIONS", "TRACE", "DELETE"]),
     ),
 )
 
@@ -326,10 +336,12 @@ def spotify_for(headers: Mapping[str, str] | None) -> Iterator[tuple[spotipy.Spo
     worker thread; ``server.run_tool`` is the sole caller.
 
     The client and its session are per-call, but connections are pooled
-    process-wide. The split matters: the access token lives in this session's
-    headers, so sharing one *session* between callers would let a second
-    caller's token overwrite a first caller's mid-flight. Sharing only the pool
-    keeps credentials strictly per-call while still reusing sockets.
+    process-wide. The split matters: the access token is held on the
+    ``spotipy.Spotify`` instance and attached to each request's headers as it
+    is made, so sharing one *client* between callers would let a second
+    caller's token serve a first caller's request. Sharing only the pool
+    (keyed by host, not by credential) keeps credentials strictly per-call
+    while still reusing sockets.
     """
     creds = credentials_from_headers(headers)
     token = access_token_for(creds)

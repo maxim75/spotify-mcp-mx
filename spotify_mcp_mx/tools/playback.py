@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from mcp.server.mcpserver import Context  # noqa: TC002 - the SDK injects by runtime type
@@ -16,8 +15,6 @@ from ..utils import to_uri
 
 if TYPE_CHECKING:
     import spotipy
-
-logger = logging.getLogger(__name__)
 
 
 def _playback_state(client: spotipy.Spotify) -> PlaybackState:

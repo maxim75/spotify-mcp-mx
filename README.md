@@ -28,9 +28,10 @@ token can never serve another's request.
 HTTP **connections** are nevertheless pooled process-wide, which saves a TCP and
 TLS handshake on every call. The split is deliberate: a connection pool is keyed
 by host, not by credential, so it can be shared safely, whereas the access token
-lives in a `requests.Session`'s headers — a shared *session* would let one
-caller's token overwrite another's mid-flight. Credentials are per-call;
-connections are process-wide.
+is held on the per-call `spotipy.Spotify` **instance** and attached fresh to the
+headers of every request it makes — so the client (and the token it carries)
+must be per-call, even though the underlying connections are process-wide.
+Credentials are per-call; connections are process-wide.
 
 An `Authorization: Bearer <access token>` header is also accepted, as a
 **testing-only** fallback — Spotify access tokens expire after 3600 seconds, so

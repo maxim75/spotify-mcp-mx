@@ -42,10 +42,19 @@ worth knowing:
 
 ## Scaling and restarts
 
-The server runs **stateless** Streamable HTTP: no MCP session is pinned to a
-worker, because the caller's credentials travel on every request anyway.
-Coolify can restart or scale the container without breaking connected
-clients, and no sticky sessions are needed at the proxy.
+The `/mcp` endpoint runs **stateless** Streamable HTTP: no MCP session is
+pinned to a worker, because the caller's credentials travel on every request
+anyway. Coolify can restart or scale the container without breaking connected
+`/mcp` clients, and no sticky sessions are needed at the proxy for that
+transport.
+
+This does **not** hold for the legacy `/sse` transport: `SseServerTransport`
+keeps its `_read_stream_writers` in the process's own memory, keyed by
+session id. With more than one replica, a `POST /messages/?session_id=...`
+that lands on a different replica than the one that opened the SSE stream
+gets a 404. If you scale beyond a single replica, either drop `/sse` in favor
+of `/mcp`, or configure session-affinity (sticky sessions) at the proxy for
+`/sse` traffic specifically.
 
 ## A note on Host header checks
 

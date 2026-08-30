@@ -294,6 +294,21 @@ def test_shared_pool_never_retries_a_post() -> None:
     assert "GET" in allowed
 
 
+def test_shared_pool_never_retries_a_put() -> None:
+    """playlist_reorder_items issues a PUT and is not idempotent: replaying it
+    after a 5xx that Spotify already actioned moves a different block of
+    tracks and can scramble the playlist. save_tracks also PUTs and is
+    idempotent, but one non-idempotent, user-data-corrupting write outweighs
+    retry coverage on an idempotent one, so PUT must stay off the whole
+    shared pool."""
+    from spotify_mcp_mx.auth import _SHARED_POOL
+
+    allowed = _SHARED_POOL.max_retries.allowed_methods
+    assert "PUT" not in allowed
+    assert "GET" in allowed
+    assert "DELETE" in allowed
+
+
 def test_token_pool_retries_post() -> None:
     """The refresh-token exchange is safely repeatable, so its own pool (never
     shared with spotipy's writes) is allowed to retry POST."""

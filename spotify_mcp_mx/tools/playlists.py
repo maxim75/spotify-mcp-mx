@@ -373,9 +373,13 @@ async def reorder_playlist_tracks(
     Args:
         playlist_id: Playlist ID
         range_start: Zero-based position of the first track to move
-        insert_before: Zero-based position to insert the moved tracks before
+        insert_before: Zero-based position to insert the moved tracks before.
+            Pass the playlist's total track count to move the block to the end.
         range_length: Number of tracks to move starting at range_start (default 1)
         snapshot_id: Playlist snapshot ID to apply the change against (optional)
+
+    Returns:
+        ActionResult with the new snapshot_id
 
     Note: Positions come from get_playlist_tracks.
     """
