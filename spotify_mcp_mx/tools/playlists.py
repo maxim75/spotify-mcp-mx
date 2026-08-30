@@ -203,7 +203,7 @@ async def get_playlist_tracks(
 async def create_playlist(
     name: str,
     description: str = "",
-    public: bool = False,
+    public: bool = True,
     ctx: Context | None = None,
 ) -> Playlist:
     """Create a new, empty playlist for the signed-in user.
@@ -278,7 +278,7 @@ async def modify_playlist_details(
             fields["public"] = public
 
         client.playlist_change_details(playlist_id, **fields)
-        return ActionResult(status="success", message=f"Updated playlist {playlist_id}")
+        return ActionResult(status="success", message="Playlist details updated successfully")
 
     return await run_tool(ctx, work)
 
@@ -295,21 +295,21 @@ async def modify_playlist_details(
 )
 @log_tool_execution
 async def add_tracks_to_playlist(
-    playlist_id: str, track_ids: list[str], ctx: Context | None = None
+    playlist_id: str, track_uris: list[str], ctx: Context | None = None
 ) -> ActionResult:
     """Add tracks to a playlist.
 
     Args:
         playlist_id: Playlist ID
-        track_ids: Track IDs or URIs to add
+        track_uris: Track IDs or URIs to add
     """
 
     def work(client: spotipy.Spotify, scope: str) -> ActionResult:
-        uris = [to_uri("track", t) for t in track_ids]
+        uris = [to_uri("track", t) for t in track_uris]
         result = spotify_api.playlist_add_items(client, scope, playlist_id, uris)
         return ActionResult(
             status="success",
-            message=f"Added {len(track_ids)} track(s) to playlist",
+            message=f"Added {len(uris)} tracks to playlist",
             snapshot_id=(result or {}).get("snapshot_id"),
         )
 
@@ -328,21 +328,21 @@ async def add_tracks_to_playlist(
 )
 @log_tool_execution
 async def remove_tracks_from_playlist(
-    playlist_id: str, track_ids: list[str], ctx: Context | None = None
+    playlist_id: str, track_uris: list[str], ctx: Context | None = None
 ) -> ActionResult:
     """Remove tracks from a playlist.
 
     Args:
         playlist_id: Playlist ID
-        track_ids: Track IDs or URIs to remove
+        track_uris: Track IDs or URIs to remove
     """
 
     def work(client: spotipy.Spotify, scope: str) -> ActionResult:
-        uris = [to_uri("track", t) for t in track_ids]
+        uris = [to_uri("track", t) for t in track_uris]
         result = spotify_api.playlist_remove_items(client, scope, playlist_id, uris)
         return ActionResult(
             status="success",
-            message=f"Removed {len(track_ids)} track(s) from playlist",
+            message=f"Removed {len(uris)} tracks from playlist",
             snapshot_id=(result or {}).get("snapshot_id"),
         )
 
@@ -397,7 +397,10 @@ async def reorder_playlist_tracks(
         )
         return ActionResult(
             status="success",
-            message="Reordered playlist tracks",
+            message=(
+                f"Moved {range_length} track(s) from position {range_start} "
+                f"to before position {insert_before}"
+            ),
             snapshot_id=(result or {}).get("snapshot_id"),
         )
 
@@ -428,6 +431,6 @@ async def unfollow_playlist(playlist_id: str, ctx: Context | None = None) -> Act
     def work(client: spotipy.Spotify, scope: str) -> ActionResult:
         pid = to_id(playlist_id)
         client.current_user_unfollow_playlist(pid)
-        return ActionResult(status="success", message=f"Unfollowed playlist {pid}")
+        return ActionResult(status="success", message="Playlist unfollowed/deleted")
 
     return await run_tool(ctx, work)
