@@ -59,6 +59,35 @@ async def test_missing_credentials_surface_as_tool_error(patched_client: Any) ->
     assert "[missing_credentials]" in str(excinfo.value)
 
 
+async def test_ctx_none_surfaces_as_a_classified_tool_error(patched_client: Any) -> None:
+    """A caller passing no ctx at all (rather than a ctx with empty headers)
+    must get the same classified error, not a raw MissingCredentialsError."""
+    with pytest.raises(ToolError) as excinfo:
+        await run_tool(None, lambda client, scope: "unreachable")
+    assert "[missing_credentials]" in str(excinfo.value)
+
+
+class RequestlessCtx:
+    """Mimics the real SDK: ``Context.headers`` is a property reaching into
+    request-scoped state, and raises ValueError when there is no active
+    request rather than returning ``None`` or an empty mapping."""
+
+    @property
+    def headers(self) -> dict[str, str]:
+        raise ValueError("Context is not available outside of a request")
+
+
+async def test_ctx_headers_property_failure_surfaces_as_missing_credentials(
+    patched_client: Any,
+) -> None:
+    """The ValueError from a real SDK Context used outside a request must be
+    classified as missing credentials, not leak as a bare, uncoded ValueError
+    indistinguishable from a tool's own argument-validation failure."""
+    with pytest.raises(ToolError) as excinfo:
+        await run_tool(RequestlessCtx(), lambda client, scope: "unreachable")  # type: ignore[arg-type]
+    assert "[missing_credentials]" in str(excinfo.value)
+
+
 async def test_spotify_exceptions_are_classified(patched_client: Any) -> None:
     def work(client: Any, scope: str) -> str:
         exc = SpotifyException(404, -1, "nope")

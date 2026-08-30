@@ -273,6 +273,15 @@ def test_spotify_for_client_session_carries_the_shared_retry() -> None:
         assert 429 not in adapter.max_retries.status_forcelist
 
 
+def test_spotify_for_client_has_a_request_timeout() -> None:
+    """A hung api.spotify.com socket must not block its worker thread forever:
+    anyio.to_thread.run_sync is non-cancellable and its default limiter caps
+    the pool at 40 threads, so unbounded calls could exhaust it for every
+    caller."""
+    with spotify_for({"Authorization": "Bearer AT-1"}) as (client, _scope):
+        assert client.requests_timeout == 10
+
+
 def test_shared_pool_never_retries_a_post() -> None:
     """spotipy issues POST for genuine writes (queue, playlist adds, create
     playlist). Retrying one after a 5xx that Spotify already actioned would

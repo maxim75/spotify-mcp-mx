@@ -338,6 +338,12 @@ def spotify_for(headers: Mapping[str, str] | None) -> Iterator[tuple[spotipy.Spo
         auth=token,
         requests_session=session,
         status_forcelist=RETRY_STATUS_CODES,
+        # anyio.to_thread.run_sync is non-cancellable and its default limiter
+        # caps the worker pool at 40 threads. Without a timeout, one hung
+        # api.spotify.com socket blocks its thread forever; 40 such calls
+        # would permanently exhaust the pool and stall the server for every
+        # caller. `_post_token` already bounds the token exchange the same way.
+        requests_timeout=10,
     )
     try:
         yield client, creds.cache_scope

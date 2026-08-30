@@ -94,16 +94,32 @@ async def run_tool[T](ctx: Context | None, fn: Callable[[spotipy.Spotify, str], 
     that surfaces as the same missing-credentials error a request with no
     headers would produce.
     """
-    if ctx is None:
-        raise convert_spotify_error(MissingCredentialsError(_MISSING_MESSAGE)) from None
-
-    headers = dict(getattr(ctx, "headers", None) or {})
-
-    def work() -> T:
-        with spotify_for(headers) as (client, scope):
-            return fn(client, scope)
-
     try:
+        if ctx is None:
+            raise MissingCredentialsError(_MISSING_MESSAGE)
+
+        try:
+            headers = dict(ctx.headers or {})
+        except ValueError as exc:
+            # The real SDK's `Context.headers` is a property that reaches
+            # `self.request_context`, which raises ValueError when there is
+            # no active request. Converted to MissingCredentialsError here so
+            # it gets a proper error code, rather than falling through to
+            # convert_spotify_error's bare ValueError branch, where it would
+            # be indistinguishable from a tool's argument-validation message.
+            raise MissingCredentialsError(_MISSING_MESSAGE) from exc
+
+        def work() -> T:
+            with spotify_for(headers) as (client, scope):
+                return fn(client, scope)
+
         return await anyio.to_thread.run_sync(work)
     except Exception as exc:  # noqa: BLE001 - re-raised as a classified ToolError
+        # The caller only ever sees the classified ToolError message below
+        # (`from None` hides the chain from them); the original exception and
+        # its traceback are logged here so an unexpected failure (a KeyError
+        # on a malformed payload, an AttributeError in a tool's `work`, a
+        # ConnectionError, ...) stays diagnosable in production instead of
+        # collapsing to a bare "Unexpected error: ..." with no file or line.
+        logger.exception("tool call failed")
         raise convert_spotify_error(exc) from None
