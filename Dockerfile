@@ -36,7 +36,10 @@ COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app spotify_mcp_mx ./spotify_mcp_mx
 
 # The local OAuth helper never runs on the server, so it is not shipped.
-RUN rm -f ./spotify_mcp_mx/authorize.py
+# Also sweep any __pycache__ directories that slip past .dockerignore, so no
+# compiled bytecode of the removed module (or anything else) lingers.
+RUN rm -f ./spotify_mcp_mx/authorize.py \
+    && find ./spotify_mcp_mx -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 USER app
 EXPOSE 6402
