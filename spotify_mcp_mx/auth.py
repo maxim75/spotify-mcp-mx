@@ -170,8 +170,8 @@ def _cache_key(creds: Credentials) -> str:
 
 
 def _post_token(url: str, **kwargs: Any) -> Any:
-    """Seam for tests. Real calls go out over the shared pool."""
-    return _pooled_session().post(url, timeout=10, **kwargs)
+    """Seam for tests. Real calls go out over the token pool (see _TOKEN_POOL)."""
+    return _token_session().post(url, timeout=10, **kwargs)
 
 
 def _exchange(creds: Credentials) -> tuple[str, float]:
@@ -247,18 +247,27 @@ class _SharedPoolAdapter(HTTPAdapter):
         pass
 
 
-# Shared across every caller. Safe precisely because a connection pool is keyed
-# by host, not by credential: it holds sockets to accounts.spotify.com and
-# api.spotify.com and nothing about who is calling. urllib3's PoolManager is
-# thread-safe, which matters because tool calls run on anyio worker threads.
+# Shared across every *spotipy* call (playback, playlists, library writes,
+# ...). Safe precisely because a connection pool is keyed by host, not by
+# credential: it holds sockets to api.spotify.com and nothing about who is
+# calling. urllib3's PoolManager is thread-safe, which matters because tool
+# calls run on anyio worker threads.
 #
 # The Retry lives here, not on spotipy.Spotify(...): spotipy only builds one
 # from `status_forcelist` inside its own session-construction path, which it
 # skips whenever we hand it a ready-made `requests_session` (see the note on
 # RETRY_STATUS_CODES above). Mounting the Retry on this adapter is what
-# actually makes 5xx retries happen — for both api.spotify.com calls made
-# through spotipy and the accounts.spotify.com token exchange in
-# `_post_token`, since both borrow this same pool.
+# actually makes 5xx retries happen for api.spotify.com calls made through
+# spotipy.
+#
+# `allowed_methods` is deliberately NOT set: urllib3's default
+# (HEAD, GET, PUT, DELETE, OPTIONS, TRACE) applies, which excludes POST. This
+# pool is mounted on every per-call spotipy client, and spotipy issues POST
+# for genuine writes — add_to_queue, add_tracks_to_playlist, create_playlist.
+# A POST that reached Spotify and succeeded but returned a 502/503/504 from a
+# gateway on the way back would, if retried, duplicate that write. PUT and
+# DELETE stay retry-eligible because Spotify's playlist-reorder and
+# library-add/-remove calls are idempotent by design — replaying one is safe.
 _SHARED_POOL = _SharedPoolAdapter(
     pool_connections=4,
     pool_maxsize=32,
@@ -268,16 +277,44 @@ _SHARED_POOL = _SharedPoolAdapter(
         read=False,
         backoff_factor=0.3,
         status_forcelist=RETRY_STATUS_CODES,
-        allowed_methods=frozenset(["GET", "POST", "PUT", "DELETE"]),
+    ),
+)
+
+# The refresh-token exchange is its own, separate pool. It is safely
+# repeatable — a retried POST here re-submits the same refresh_token and
+# either gets back the same class of result or a fresh access token, never a
+# duplicated side effect — so POST is explicitly retry-eligible. This MUST
+# stay separate from _SHARED_POOL: that pool is mounted on every spotipy
+# client and deliberately excludes POST (see the comment above) precisely
+# because a duplicated write there is a real user-visible bug. Merging the
+# two pools would silently re-enable POST retries for every spotipy write.
+_TOKEN_POOL = _SharedPoolAdapter(
+    pool_connections=2,
+    pool_maxsize=8,
+    max_retries=Retry(
+        total=3,
+        status=3,
+        read=False,
+        backoff_factor=0.3,
+        status_forcelist=RETRY_STATUS_CODES,
+        allowed_methods=frozenset(["POST"]),
     ),
 )
 
 
 def _pooled_session() -> requests.Session:
-    """Return a fresh session that borrows the process-wide connection pool."""
+    """Return a fresh session that borrows the process-wide spotipy connection pool."""
     session = requests.Session()
     session.mount("https://", _SHARED_POOL)
     session.mount("http://", _SHARED_POOL)
+    return session
+
+
+def _token_session() -> requests.Session:
+    """Return a fresh session that borrows the process-wide token-exchange pool."""
+    session = requests.Session()
+    session.mount("https://", _TOKEN_POOL)
+    session.mount("http://", _TOKEN_POOL)
     return session
 
 

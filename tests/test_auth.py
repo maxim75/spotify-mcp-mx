@@ -273,6 +273,26 @@ def test_spotify_for_client_session_carries_the_shared_retry() -> None:
         assert 429 not in adapter.max_retries.status_forcelist
 
 
+def test_shared_pool_never_retries_a_post() -> None:
+    """spotipy issues POST for genuine writes (queue, playlist adds, create
+    playlist). Retrying one after a 5xx that Spotify already actioned would
+    duplicate the write, so POST must stay off the pool every spotipy client
+    shares — only the separate token-exchange pool may retry POST."""
+    from spotify_mcp_mx.auth import _SHARED_POOL
+
+    allowed = _SHARED_POOL.max_retries.allowed_methods
+    assert "POST" not in allowed
+    assert "GET" in allowed
+
+
+def test_token_pool_retries_post() -> None:
+    """The refresh-token exchange is safely repeatable, so its own pool (never
+    shared with spotipy's writes) is allowed to retry POST."""
+    from spotify_mcp_mx.auth import _TOKEN_POOL
+
+    assert "POST" in _TOKEN_POOL.max_retries.allowed_methods
+
+
 def test_spotify_for_never_constructs_a_spotify_oauth() -> None:
     with spotify_for({"Authorization": "Bearer AT-1"}) as (client, _scope):
         # No SpotifyOAuth (or any auth manager) anywhere: the access token was
