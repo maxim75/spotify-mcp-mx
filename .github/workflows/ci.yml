@@ -22,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - name: Build the image
         run: docker build -t spotify-mcp-mx:ci .
       - name: Start the container
@@ -35,7 +38,7 @@ jobs:
           echo "health check never came up"; docker logs mcp; exit 1
       - name: Assert all 25 tools are listed
         run: |
-          uvx --from mcp python - <<'PY'
+          uvx --from 'mcp==2.1.1' python - <<'PY'
           import anyio
           from mcp import ClientSession
           from mcp.client.streamable_http import streamable_http_client
