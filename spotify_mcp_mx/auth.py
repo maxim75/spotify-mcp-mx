@@ -15,6 +15,7 @@ bypasses all of it.
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -25,8 +26,17 @@ from typing import TYPE_CHECKING, Any
 import requests
 import spotipy
 from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .errors import MissingCredentialsError, TokenRefreshError
+
+# spotipy logs the full request, including the `Authorization: Bearer <token>`
+# header, at DEBUG level. Root defaults to WARNING so this is latent today, but
+# any operator who flips on DEBUG logging (e.g. `logging.basicConfig(level=
+# logging.DEBUG)`) would otherwise dump every caller's access token to logs.
+# This module owns the "no credential in any log record" invariant, so the
+# defense belongs here rather than relying on every deployment's log config.
+logging.getLogger("spotipy").setLevel(logging.INFO)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -52,6 +62,14 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"  # nosec B105 - a URL, not 
 # Retry transient server errors but never 429. Since July 2026 Spotify counts
 # quota per developer account, so retrying a QUOTA_EXCEEDED 429 burns the pool
 # for every app the caller owns; surface it and let them back off.
+#
+# spotipy only builds a Retry from `status_forcelist` inside its own
+# `_build_session()`, which it skips whenever a caller (us) passes in a ready
+# `requests_session`. Passing `status_forcelist` to `spotipy.Spotify(...)` is
+# therefore inert — it is stored on the instance and never consulted. The
+# retry behaviour actually comes from the `Retry` mounted on `_SHARED_POOL`
+# below, built from this same tuple; the kwarg on `spotipy.Spotify(...)` is
+# kept only as documentation of intent.
 RETRY_STATUS_CODES = (500, 502, 503, 504)
 
 # Refresh a little early so a token cannot expire in flight.
@@ -77,7 +95,16 @@ class Credentials:
 
     @property
     def cache_scope(self) -> str:
-        """Key for anything memoised per Spotify app (see spotify_api regime memo)."""
+        """Key for anything memoised per Spotify app (see spotify_api regime memo).
+
+        The three-header form scopes on the client id. The bearer form has no
+        client id, but callers must still not collide with one another — two
+        different bearer tokens must land in two different regime-memo
+        buckets — so it scopes on an opaque digest of the token instead. The
+        raw token is never returned here.
+        """
+        if self.access_token:
+            return hashlib.sha256(self.access_token.encode()).hexdigest()[:16]
         return self.client_id
 
 
@@ -128,8 +155,15 @@ def reset_token_cache() -> None:
 
 
 def _cache_key(creds: Credentials) -> str:
+    # Includes client_secret: a cache key of only (client_id, refresh_token)
+    # would let a caller who supplies the right id and refresh token but the
+    # WRONG secret be served a token that a different, correctly-authenticated
+    # caller warmed — skipping client authentication entirely for the life of
+    # that cache entry.
     digest = hashlib.sha256()
     digest.update(creds.client_id.encode())
+    digest.update(b"\0")
+    digest.update(creds.client_secret.encode())
     digest.update(b"\0")
     digest.update(creds.refresh_token.encode())
     return digest.hexdigest()
@@ -217,7 +251,26 @@ class _SharedPoolAdapter(HTTPAdapter):
 # by host, not by credential: it holds sockets to accounts.spotify.com and
 # api.spotify.com and nothing about who is calling. urllib3's PoolManager is
 # thread-safe, which matters because tool calls run on anyio worker threads.
-_SHARED_POOL = _SharedPoolAdapter(pool_connections=4, pool_maxsize=32)
+#
+# The Retry lives here, not on spotipy.Spotify(...): spotipy only builds one
+# from `status_forcelist` inside its own session-construction path, which it
+# skips whenever we hand it a ready-made `requests_session` (see the note on
+# RETRY_STATUS_CODES above). Mounting the Retry on this adapter is what
+# actually makes 5xx retries happen — for both api.spotify.com calls made
+# through spotipy and the accounts.spotify.com token exchange in
+# `_post_token`, since both borrow this same pool.
+_SHARED_POOL = _SharedPoolAdapter(
+    pool_connections=4,
+    pool_maxsize=32,
+    max_retries=Retry(
+        total=3,
+        status=3,
+        read=False,
+        backoff_factor=0.3,
+        status_forcelist=RETRY_STATUS_CODES,
+        allowed_methods=frozenset(["GET", "POST", "PUT", "DELETE"]),
+    ),
+)
 
 
 def _pooled_session() -> requests.Session:
