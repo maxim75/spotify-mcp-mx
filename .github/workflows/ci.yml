@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run mypy spotify_mcp_mx
+      - run: uv run pytest -m "not live"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Build the image
+        run: docker build -t spotify-mcp-mx:ci .
+      - name: Start the container
+        run: docker run -d --name mcp -p 6402:6402 spotify-mcp-mx:ci
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf localhost:6402/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "health check never came up"; docker logs mcp; exit 1
+      - name: Assert all 25 tools are listed
+        run: |
+          uvx --from 'mcp==2.1.1' python - <<'PY'
+          import anyio
+          from mcp import ClientSession
+          from mcp.client.streamable_http import streamable_http_client
+
+          async def main() -> None:
+              async with streamable_http_client("http://localhost:6402/mcp") as (r, w):
+                  async with ClientSession(r, w) as session:
+                      await session.initialize()
+                      tools = (await session.list_tools()).tools
+              assert len(tools) == 25, f"expected 25 tools, got {len(tools)}"
+              print(f"{len(tools)} tools listed")
+
+          anyio.run(main)
+          PY
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs mcp
+
+  live:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      # Skips itself when the secrets are absent, so this job is green without
+      # them. Fork pull requests never receive secrets, so they always skip.
+      - run: uv run pytest -m live
+        env:
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}

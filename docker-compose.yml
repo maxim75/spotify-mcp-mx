@@ -1,0 +1,27 @@
+# Deployment target: Coolify (Docker Compose resource).
+#
+# There are deliberately NO secrets here. Each caller sends their own Spotify
+# credentials in request headers, so the server holds none of its own.
+
+services:
+  spotify-mcp-mx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spotify-mcp-mx:latest
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 6402
+    ports:
+      - "6402:6402"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request;urllib.request.urlopen("http://127.0.0.1:6402/health").read()
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
