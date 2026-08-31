@@ -37,16 +37,109 @@ An `Authorization: Bearer <access token>` header is also accepted, as a
 **testing-only** fallback — Spotify access tokens expire after 3600 seconds, so
 it is not a substitute for the three-header form in any real client.
 
-Mint a refresh token from your own machine:
+See [Getting your credentials](#getting-your-credentials) below for how to
+create the Spotify app and mint the refresh token.
+
+## Getting your credentials
+
+You need a Spotify app of your own. The server has none — that is the point —
+so every user brings their own app and their own consent. This is a one-time
+setup that takes a couple of minutes.
+
+**You will need a Spotify account.** Playback tools additionally need
+**Premium**; everything else works on a free account.
+
+### 1. Create a Spotify app
+
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   and sign in.
+2. Click **Create app**.
+3. Fill in any **App name** and **App description** — they are yours and are
+   not used by this server.
+4. Set **Redirect URI** to exactly:
+
+   ```
+   http://127.0.0.1:8888
+   ```
+
+   This must match character for character. Spotify rejects `localhost` in
+   place of `127.0.0.1` for new apps, and a trailing slash counts as a
+   different URI. If the authorize step later fails with *"No authorization
+   code received"*, this is almost always why.
+5. Tick **Web API** under *Which API/SDKs are you planning to use?*
+6. Save, then open the app's **Settings**. Copy the **Client ID**, and click
+   **View client secret** to copy the **Client secret**.
+
+Nothing in this app needs to be published or reviewed. It stays in development
+mode, which allows up to 25 users you add yourself — and for a personal
+instance, that is only you.
+
+### 2. Mint a refresh token
+
+From a clone of this repository, on your own machine:
 
 ```bash
 uv run python -m spotify_mcp_mx.authorize
 ```
 
-This opens a browser to Spotify's consent screen, requests every scope the
-tools need, and prints the three headers to paste into your client. It never
-runs on the server, is excluded from the Docker image, and writes nothing to
-disk.
+It prompts for the three values from step 1:
+
+```
+Client ID: <paste>
+Client secret: <paste>
+Redirect URI [http://127.0.0.1:8888]: <press Enter to accept>
+```
+
+It then opens your browser to Spotify's consent screen, listing the 16 scopes
+the tools need. Approve it. The browser redirects to a local one-shot server on
+port 8888, which captures the authorization code and exchanges it for a refresh
+token. Your terminal prints:
+
+```
+Done. Add these headers to your MCP client:
+
+  X-Spotify-Client-Id:     2f9a…
+  X-Spotify-Client-Secret: 7b3e…
+  X-Spotify-Refresh-Token: AQBv…
+
+They are not saved anywhere — copy them now.
+```
+
+**Copy all three now** — the helper deliberately writes nothing to disk, so
+closing the terminal loses the refresh token and you would have to run it
+again. Paste them into your MCP client config (see
+[Connecting a client](#connecting-a-client)).
+
+The helper never runs on the server and is deleted from the Docker image. It is
+the only part of this project that performs a browser OAuth flow.
+
+### 3. What you end up with
+
+| Value | Lifetime | Where it lives |
+|---|---|---|
+| Client ID | until you delete the app | your MCP client's config |
+| Client secret | until you rotate it in the dashboard | your MCP client's config |
+| Refresh token | indefinite — until you revoke it | your MCP client's config |
+
+The refresh token does **not** expire. The server exchanges it for a one-hour
+access token on demand and caches that in memory, so you configure this once
+and it keeps working. Nothing is stored server-side, so rotating any of the
+three is a change to your own config and needs no redeploy.
+
+To revoke access, remove the app under
+[Spotify Account → Apps](https://www.spotify.com/account/apps/), which
+invalidates the refresh token immediately.
+
+### Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| *No authorization code received. Did the redirect URI match exactly?* | The dashboard's Redirect URI differs from what you entered. `localhost` ≠ `127.0.0.1`, and a trailing slash matters. |
+| *INVALID_CLIENT: Invalid redirect URI* on the consent screen | Same cause, caught by Spotify before it reaches the helper. |
+| *Spotify rejected the authorization code* | Client ID and secret are from different apps, or the secret was truncated when copied. |
+| Address already in use | Something else holds port 8888. Free it, or set a different Redirect URI in both the dashboard and the prompt. |
+| Tools return `[missing_credentials]` | The MCP client is not sending the headers. For Claude Desktop, check the `mcp-remote` form has **no space** after the colon in `--header`. |
+| Playback tools return `premium_required` | Playback needs Spotify Premium and an open device. Try `list_devices` then `transfer_playback`. |
 
 ## Endpoints
 
